@@ -12,7 +12,7 @@ print("Using device:", device)
 # ==========================================
 N_neurons = 200
 K_batch = 100
-CHUNK_SIZE = 100  # Avoid OOM on MPS by processing in chunks
+CHUNK_SIZE = 100
 learning_rate = 0.04
 num_epochs = 1000
 module_size = 10
@@ -255,6 +255,16 @@ for chunk_idx in range(num_chunks):
                         # Structurally obliterate paths locally out of mask entirely
                         mask[k, idx_to_prune, :] = 0.0
                         mask[k, :, idx_to_prune] = 0.0
+                        
+                    # Unstructured Connection Pruning (Magnitude Based)
+                    for k in range(actual_chunk):
+                        active_weights = W[k].abs()[mask[k] > 0]
+                        num_w_prune = int(active_weights.numel() * current_ratio)
+                        if num_w_prune > 0:
+                            threshold = torch.kthvalue(active_weights, num_w_prune).values
+                            w_mask = (W[k].abs() > threshold).float()
+                            mask[k] *= w_mask
+                            W[k] *= mask[k]
     # Recompute final loss structurally accurately
     with torch.no_grad():
         final_outputs = forward_pass(W, b, h0)
