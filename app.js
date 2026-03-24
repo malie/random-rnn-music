@@ -44,13 +44,13 @@ function startAutoNoise() {
     clearInterval(autoNoiseInterval);
     autoNoiseInterval = setInterval(() => {
         if (!isPlaying || !autoNoiseCheckbox.checked) return;
-        noiseLevel += 0.02;
-        if (noiseLevel > 0.4001) {
+        noiseLevel += 0.1;
+        if (noiseLevel > 0.5001) {
             noiseLevel = 0.0;
         }
         noiseSlider.value = noiseLevel;
         noiseVal.textContent = noiseLevel.toFixed(2);
-    }, 40000);
+    }, 10000);
 }
 
 autoNoiseCheckbox.addEventListener('change', (e) => {
