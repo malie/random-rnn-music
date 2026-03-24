@@ -194,6 +194,7 @@ function loadSelectedNetwork() {
         gLinks.selectAll("*").remove();
     }
     
+    synth.releaseAll();
     activeNotes.clear();
     initializeNetwork();
 }

@@ -10,7 +10,7 @@ print("Using device:", device)
 # ==========================================
 # HYPERPARAMETERS & CONFIGURATION
 # ==========================================
-N_neurons = 150
+N_neurons = 400
 K_batch = 100
 CHUNK_SIZE = 100
 learning_rate = 0.1
@@ -19,7 +19,7 @@ module_size = 10
 p_in = 0.35    # Dense local connections
 p_out = 0.015  # Very sparse global connections
 sparsity_penalty = 0.001
-target_pruning_ratio = 0.1
+target_pruning_ratio = 0.3
 prune_every = 200
 num_top_k = 20
 O_notes = 37
@@ -49,6 +49,9 @@ seq = [
     ('E5', 2), ('C5', 2), ('D5', 2),
     ('C5', 2), ('Rest', 2)
 ]
+
+# Repeat the first notes exactly structurally at the tail teaching the BPTT recurrence
+seq += seq[:9]
 
 # Unroll sequence into list of notes per step
 target_notes = []
@@ -107,8 +110,11 @@ for t in range(T_steps):
 
 # Add chord bonus
 
+# Add chord bonus dynamically structurally wrapped
+original_measure_length = 48
 for t in range(T_steps):
-    for c_note in chords[t]:
+    c_idx = t % original_measure_length
+    for c_note in chords[c_idx]:
         if c_note in notes_map:
             n_idx = notes_map[c_note]
             T_soft[t, n_idx] = max(T_soft[t, n_idx], 0.3)
@@ -127,11 +133,11 @@ bass_seq = [
     (44, 'C3', 2)  # Measure 8
 ]
 
-for start_step, b_note, dur in bass_seq:
-    if b_note in notes_map:
-        for t in range(start_step, start_step + dur):
-            if t < T_steps:
-                T_soft[t, notes_map[b_note]] = max(T_soft[t, notes_map[b_note]], 0.8)
+for t in range(T_steps):
+    t_mod = t % original_measure_length
+    for start_step, b_note, dur in bass_seq:
+        if b_note in notes_map and start_step <= t_mod < start_step + dur:
+            T_soft[t, notes_map[b_note]] = max(T_soft[t, notes_map[b_note]], 0.8)
 
 
 T_soft = T_soft.to(device)
@@ -226,6 +232,25 @@ for chunk_idx in range(num_chunks):
         
         W.grad *= mask
         optimizer.step()
+        
+        # Successive Halving: After 50 epochs, evaluate exactly and physically keep only the best 30 tracking bounds natively!
+        if epoch == 50 and actual_chunk > 30:
+            with torch.no_grad():
+                k_keep = 30
+                _, best_idx = torch.topk(losses, k=k_keep, largest=False)
+                
+                W = W[best_idx].clone()
+                b = b[best_idx].clone()
+                h0 = h0[best_idx].clone()
+                mask = mask[best_idx].clone()
+                
+                W.requires_grad = True
+                b.requires_grad = True
+                h0.requires_grad = True
+                
+                actual_chunk = k_keep
+                optimizer = torch.optim.Adam([h0, b, W], lr=learning_rate)
+                print(f"--- Successive Halving at Epoch 50: Reduced chunk to top {k_keep} architectures organically! ---")
         
         # Iterative Pruning Sequence
         if epoch > 0 and epoch % prune_every == 0:
