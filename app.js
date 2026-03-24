@@ -19,8 +19,31 @@ const noiseVal = document.getElementById('noise-val');
 const thresholdSlider = document.getElementById('threshold-slider');
 const thresholdVal = document.getElementById('threshold-val');
 const autoSwitchCheckbox = document.getElementById('auto-switch');
+const autoNoiseCheckbox = document.getElementById('auto-noise');
 
 let autoSwitchInterval = null;
+let autoNoiseInterval = null;
+
+function startAutoNoise() {
+    clearInterval(autoNoiseInterval);
+    autoNoiseInterval = setInterval(() => {
+        if (!isPlaying || !autoNoiseCheckbox.checked) return;
+        noiseLevel += 0.02;
+        if (noiseLevel > 0.4001) {
+            noiseLevel = 0.0;
+        }
+        noiseSlider.value = noiseLevel;
+        noiseVal.textContent = noiseLevel.toFixed(2);
+    }, 40000);
+}
+
+autoNoiseCheckbox.addEventListener('change', (e) => {
+    if (e.target.checked && isPlaying) {
+        startAutoNoise();
+    } else {
+        clearInterval(autoNoiseInterval);
+    }
+});
 
 function startAutoSwitch() {
     clearInterval(autoSwitchInterval);
@@ -45,6 +68,8 @@ let currentBPM = parseInt(bpmSlider.value);
 let noiseLevel = parseFloat(noiseSlider.value);
 let noteThreshold = parseFloat(thresholdSlider.value);
 
+let activeNotes = new Set();
+
 bpmSlider.addEventListener('input', (e) => {
     currentBPM = parseInt(e.target.value);
     bpmVal.textContent = currentBPM;
@@ -65,6 +90,9 @@ thresholdSlider.addEventListener('input', (e) => {
 
 // Setup Tone.js Synthesis
 // We'll use a PolySynth to play multiple notes
+const limiter = new Tone.Limiter(-4).toDestination();
+const compressor = new Tone.Compressor(-20, 3).connect(limiter);
+
 const synth = new Tone.PolySynth(Tone.Synth, {
     oscillator: {
         type: "fatsine",
@@ -76,10 +104,11 @@ const synth = new Tone.PolySynth(Tone.Synth, {
         decay: 0.2,
         sustain: 0.4,
         release: 0.8
-    }
-}).toDestination();
+    },
+    volume: -6
+}).connect(compressor);
 // Add some mild reverb
-const reverb = new Tone.Reverb(1.5).toDestination();
+const reverb = new Tone.Reverb(1.5).connect(compressor);
 synth.connect(reverb);
 
 
@@ -148,6 +177,8 @@ function loadSelectedNetwork() {
         gNodes.selectAll("*").remove();
         gLinks.selectAll("*").remove();
     }
+    
+    activeNotes.clear();
     initializeNetwork();
 }
 
@@ -162,14 +193,35 @@ function initializeNetwork() {
         reverse_map[rnnData.notes_map[note]] = note;
     }
 
+    window.nodeMap = {};
     for (let i = 0; i < N; i++) {
         let isOutput = i < rnnData.O_notes;
-        networkNodes.push({
+
+        let isPruned = true;
+        if (rnnData.b[i] !== 0) isPruned = false;
+        if (isPruned) {
+            for (let j = 0; j < N; j++) {
+                // If it has incoming or outgoing connections, it's alive!
+                if (rnnData.W[i][j] !== 0 || rnnData.W[j][i] !== 0) {
+                    isPruned = false;
+                    break;
+                }
+            }
+        }
+
+        if (isPruned && !isOutput) {
+            window.nodeMap[i] = null;
+            continue; // Skip adding to D3 simulation layer structurally completely
+        }
+
+        let nObj = {
             id: i,
             isOutput: isOutput,
             note: isOutput ? reverse_map[i] : null,
             activation: h_state[i]
-        });
+        };
+        networkNodes.push(nObj);
+        window.nodeMap[i] = nObj;
     }
 
     // Create links (only for connections > 0.01 to keep rendering fast, or all non-zero)
@@ -263,11 +315,15 @@ startBtn.addEventListener('click', async () => {
         statusEl.textContent = `Playing Rank ${currentNetworkIndex + 1} Variation...`;
 
         if (autoSwitchCheckbox.checked) startAutoSwitch();
+        if (autoNoiseCheckbox.checked) startAutoNoise();
     } else {
         Tone.Transport.stop();
         Tone.Transport.clear(loopEvent);
+        synth.releaseAll();
+        activeNotes.clear();
         isPlaying = false;
         clearInterval(autoSwitchInterval);
+        clearInterval(autoNoiseInterval);
         startBtn.textContent = 'Start Playing';
         statusEl.textContent = 'Stopped.';
     }
@@ -346,7 +402,7 @@ function stepRNN(time) {
     }
 
     // 4. Apply tanh activation and add stochasticity
-    let notesToPlay = [];
+    let currentActive = new Set();
     for (let j = 0; j < N; j++) {
         let act = next_h[j];
         if (noiseLevel > 0) {
@@ -355,20 +411,35 @@ function stepRNN(time) {
 
         let newAct = Math.tanh(act);
         h_state[j] = newAct;
-        networkNodes[j].activation = newAct;
+        
+        let nodeRef = window.nodeMap[j];
+        if (nodeRef) {
+            nodeRef.activation = newAct;
+        }
 
         // Check output notes
         if (j < rnnData.O_notes) {
             let prob = (newAct + 1) / 2;
-            if (prob > noteThreshold) {
-                notesToPlay.push(networkNodes[j].note);
+            if (prob > noteThreshold && nodeRef) {
+                currentActive.add(nodeRef.note);
             }
         }
     }
 
-    if (notesToPlay.length > 0) {
-        synth.triggerAttackRelease(notesToPlay, "8n", time);
-    }
+    let toAttack = [];
+    currentActive.forEach(note => {
+        if (!activeNotes.has(note)) toAttack.push(note);
+    });
+
+    let toRelease = [];
+    activeNotes.forEach(note => {
+        if (!currentActive.has(note)) toRelease.push(note);
+    });
+
+    if (toAttack.length > 0) synth.triggerAttack(toAttack, time);
+    if (toRelease.length > 0) synth.triggerRelease(toRelease, time);
+    
+    activeNotes = currentActive;
 
     // Animate visualizer via D3 (must be run on main thread sync to drawing)
     // We defer to requestAnimationFrame to decouple heavy DOM ops from audio thread if needed,

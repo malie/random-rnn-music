@@ -10,17 +10,17 @@ print("Using device:", device)
 # ==========================================
 # HYPERPARAMETERS & CONFIGURATION
 # ==========================================
-N_neurons = 150
+N_neurons = 200
 K_batch = 100
 CHUNK_SIZE = 100  # Avoid OOM on MPS by processing in chunks
-learning_rate = 0.02
+learning_rate = 0.04
 num_epochs = 1000
 module_size = 10
 p_in = 0.35    # Dense local connections
 p_out = 0.015  # Very sparse global connections
 sparsity_penalty = 0.001
-pruning_ratio = 0.03
-prune_every = 100
+target_pruning_ratio = 0.3
+prune_every = 200
 num_top_k = 20
 O_notes = 37
 # ==========================================
@@ -47,14 +47,17 @@ seq = [
     ('B4', 2), ('A4', 2),
     ('F5', 1), ('F5', 1),
     ('E5', 2), ('C5', 2), ('D5', 2),
-    ('C5', 4)  # total: 2+6+4+2+6+4+2+6+4+2+6+4 = Wait: 2+2+2+2+4+2+2+2+2+4 + 2+2+2+2+2 + 2+2+2+2+4 = 48
+    ('C5', 2), ('Rest', 2)
 ]
 
 # Unroll sequence into list of notes per step
 target_notes = []
 for note, dur in seq:
     for i in range(dur):
-        target_notes.append(notes_map[note])
+        if note == 'Rest':
+            target_notes.append(-1)
+        else:
+            target_notes.append(notes_map[note])
 
 T_steps = len(target_notes)
 
@@ -84,13 +87,14 @@ chords = [
 
 T_target = torch.zeros((T_steps, O_notes))
 for t in range(T_steps):
-    # Base target: 1.0 for the melody note
-    T_target[t, target_notes[t]] = 1.0
+    if target_notes[t] != -1:
+        # Base target: 1.0 for the melody note
+        T_target[t, target_notes[t]] = 1.0
     
 # Temporal smoothing (loss smaller if note is temporally close)
 T_soft = T_target.clone()
 
-
+'''
 for t in range(T_steps):
     for i in range(O_notes):
         # find distance to nearest t' where note i is played
@@ -99,7 +103,7 @@ for t in range(T_steps):
             min_dist = min(dists)
             if min_dist > 0:
                 T_soft[t, i] = max(T_soft[t, i], math.exp(-min_dist / 2.0))
-
+'''
 
 # Add chord bonus
 
@@ -108,6 +112,26 @@ for t in range(T_steps):
         if c_note in notes_map:
             n_idx = notes_map[c_note]
             T_soft[t, n_idx] = max(T_soft[t, n_idx], 0.3)
+
+# Add explicit bass rhythm bounds mathematically matching measures
+bass_seq = [
+    (0, 'C3', 2),  # Pickup
+    (2, 'C3', 2),  # Measure 1
+    (8, 'G3', 2),  # Measure 2
+    (14, 'G3', 2), # Measure 3
+    (20, 'C3', 2), # Measure 4
+    (26, 'C3', 2), # Measure 5
+    (32, 'F3', 2), # Measure 6
+    (38, 'C3', 2), # Measure 7 (split)
+    (41, 'G3', 2), 
+    (44, 'C3', 2)  # Measure 8
+]
+
+for start_step, b_note, dur in bass_seq:
+    if b_note in notes_map:
+        for t in range(start_step, start_step + dur):
+            if t < T_steps:
+                T_soft[t, notes_map[b_note]] = max(T_soft[t, notes_map[b_note]], 0.8)
 
 
 T_soft = T_soft.to(device)
@@ -152,9 +176,11 @@ def compute_loss(outputs):
     
     # Penalty for too many notes played at once
     # We sum the output activations at each step
-    # Target sum is roughly 1 (melody) + maybe 1-2 chord notes ~ 2
     out_sums = torch.sum(out_probs, dim=2) # (K, T)
-    sparsity_loss = torch.mean((out_sums - 1.5)**2, dim=1)
+    
+    # Dynamically scale expected sums iteratively matching explicitly what T_soft bounded
+    expected_sums = torch.sum(T_soft, dim=1).unsqueeze(0).expand(outputs.shape[0], T_steps)
+    sparsity_loss = torch.mean((out_sums - expected_sums)**2, dim=1)
     
     return mse + sparsity_penalty * sparsity_loss
 
@@ -207,18 +233,28 @@ for chunk_idx in range(num_chunks):
                 mean_act = outputs.abs().mean(dim=1)
                 mean_act[:, :O_notes] = float('inf')
                 
-                num_prune = int((N_neurons - O_notes) * pruning_ratio)
-                _, prune_indices = torch.topk(mean_act, k=num_prune, largest=False, dim=1)
+                pruning_op_idx = epoch // prune_every
+                total_pruning_ops = (num_epochs - 1) // prune_every
                 
-                for k in range(actual_chunk):
-                    idx_to_prune = prune_indices[k]
-                    W[k, idx_to_prune, :] = 0.0
-                    W[k, :, idx_to_prune] = 0.0
-                    b[k, idx_to_prune] = 0.0
-                    h0[k, idx_to_prune] = 0.0
-                    # Structurally obliterate paths locally out of mask entirely
-                    mask[k, idx_to_prune, :] = 0.0
-                    mask[k, :, idx_to_prune] = 0.0
+                if total_pruning_ops > 0:
+                    current_ratio = target_pruning_ratio * (pruning_op_idx / total_pruning_ops)
+                else:
+                    current_ratio = target_pruning_ratio
+                    
+                num_prune = int((N_neurons - O_notes) * current_ratio)
+                
+                if num_prune > 0:
+                    _, prune_indices = torch.topk(mean_act, k=num_prune, largest=False, dim=1)
+                    
+                    for k in range(actual_chunk):
+                        idx_to_prune = prune_indices[k]
+                        W[k, idx_to_prune, :] = 0.0
+                        W[k, :, idx_to_prune] = 0.0
+                        b[k, idx_to_prune] = 0.0
+                        h0[k, idx_to_prune] = 0.0
+                        # Structurally obliterate paths locally out of mask entirely
+                        mask[k, idx_to_prune, :] = 0.0
+                        mask[k, :, idx_to_prune] = 0.0
     # Recompute final loss structurally accurately
     with torch.no_grad():
         final_outputs = forward_pass(W, b, h0)
