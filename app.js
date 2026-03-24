@@ -424,22 +424,27 @@ function stepRNN(time) {
     // 4. Apply tanh activation and add stochasticity
     let currentActive = new Set();
     for (let j = 0; j < N; j++) {
-        let act = next_h[j];
-        if (noiseLevel > 0) {
-            act += (Math.random() * 2 - 1) * noiseLevel;
-        }
+        let baseAct = next_h[j];
+        
+        // 1. Core State: Pure deterministic recurrent state tracking identically PyTorch trained constraints
+        let cleanAct = Math.tanh(baseAct);
+        h_state[j] = cleanAct;
 
-        let newAct = Math.tanh(act);
-        h_state[j] = newAct;
+        // 2. Visual & Output State: Add stochasticity purely dynamically without permanently damaging the recurrence
+        let noisyAct = baseAct;
+        if (noiseLevel > 0) {
+            noisyAct += (Math.random() * 2 - 1) * noiseLevel;
+        }
+        let finalOutputAct = Math.tanh(noisyAct);
         
         let nodeRef = window.nodeMap[j];
         if (nodeRef) {
-            nodeRef.activation = newAct;
+            nodeRef.activation = finalOutputAct;
         }
 
-        // Check output notes
+        // Check output notes explicitly on the noisy outputs locally
         if (j < rnnData.O_notes) {
-            let prob = (newAct + 1) / 2;
+            let prob = (finalOutputAct + 1) / 2;
             if (prob > noteThreshold && nodeRef) {
                 currentActive.add(nodeRef.note);
             }

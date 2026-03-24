@@ -10,7 +10,7 @@ print("Using device:", device)
 # ==========================================
 # HYPERPARAMETERS & CONFIGURATION
 # ==========================================
-N_neurons = 400
+N_neurons = 220
 K_batch = 100
 CHUNK_SIZE = 100
 learning_rate = 0.1
