@@ -302,7 +302,8 @@ function initializeNetwork() {
     });
 }
 
-startBtn.addEventListener('click', async () => {
+async function togglePlayback(e) {
+    if (e) e.preventDefault();
     await Tone.start();
     if (!isPlaying) {
         Tone.Transport.bpm.value = currentBPM;
@@ -325,9 +326,11 @@ startBtn.addEventListener('click', async () => {
         clearInterval(autoSwitchInterval);
         clearInterval(autoNoiseInterval);
         startBtn.textContent = 'Start Playing';
-        statusEl.textContent = 'Stopped.';
     }
-});
+}
+
+startBtn.addEventListener('click', togglePlayback);
+startBtn.addEventListener('touchstart', togglePlayback);
 
 window.addEventListener('resize', () => {
     width = window.innerWidth;

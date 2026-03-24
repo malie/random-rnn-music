@@ -10,16 +10,16 @@ print("Using device:", device)
 # ==========================================
 # HYPERPARAMETERS & CONFIGURATION
 # ==========================================
-N_neurons = 200
+N_neurons = 150
 K_batch = 100
 CHUNK_SIZE = 100
-learning_rate = 0.04
+learning_rate = 0.1
 num_epochs = 1000
 module_size = 10
 p_in = 0.35    # Dense local connections
 p_out = 0.015  # Very sparse global connections
 sparsity_penalty = 0.001
-target_pruning_ratio = 0.3
+target_pruning_ratio = 0.1
 prune_every = 200
 num_top_k = 20
 O_notes = 37
