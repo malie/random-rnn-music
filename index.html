@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random RNN - Happy Birthday</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="ui-container">
+        <h1>Random RNN: Happy Birthday</h1>
+        <p>This is a randomly initialized, sparse Recurrent Neural Network trained to approximate the song "Happy Birthday" using the lottery ticket hypothesis.</p>
+        <button id="start-btn">Start Playing</button>
+        <div id="status">Loading...</div>
+        
+        <h2>Network Weights Tuning & Simulation Settings</h2>
+        <div class="controls">
+            <label>Select Network (Top 20):
+                <select id="network-select"></select>
+            </label>
+            <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:10px; cursor:pointer;" id="auto-switch-label">
+                <input type="checkbox" id="auto-switch" checked>
+                Auto-switch RNN (60s)
+            </label>
+            <label>BPM: <span id="bpm-val">150</span>
+                <input type="range" id="bpm-slider" min="60" max="300" value="150">
+            </label>
+            <label>Noise Level (Stochasticity): <span id="noise-val">0.05</span>
+                <input type="range" id="noise-slider" step="0.01" min="0" max="0.5" value="0.05">
+            </label>
+            <label>Note Activation Threshold: <span id="threshold-val">0.5</span>
+                <input type="range" id="threshold-slider" step="0.05" min="-1" max="1" value="0.5">
+            </label>
+        </div>
+    </div>
+    
+    <!-- D3 wrapper -->
+    <svg id="network-graph"></svg>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
