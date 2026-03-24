@@ -20,6 +20,22 @@ const thresholdSlider = document.getElementById('threshold-slider');
 const thresholdVal = document.getElementById('threshold-val');
 const autoSwitchCheckbox = document.getElementById('auto-switch');
 const autoNoiseCheckbox = document.getElementById('auto-noise');
+const iosWarning = document.getElementById('ios-warning');
+
+// Detect iOS devices to display the hardware mute warning
+const isIOS = [
+  'iPad Simulator',
+  'iPhone Simulator',
+  'iPod Simulator',
+  'iPad',
+  'iPhone',
+  'iPod'
+].includes(navigator.platform)
+|| (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+
+if (isIOS && iosWarning) {
+    iosWarning.style.display = 'block';
+}
 
 let autoSwitchInterval = null;
 let autoNoiseInterval = null;
