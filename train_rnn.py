@@ -10,7 +10,7 @@ print("Using device:", device)
 # ==========================================
 # HYPERPARAMETERS & CONFIGURATION
 # ==========================================
-N_neurons = 220
+N_neurons = 200
 K_batch = 100
 CHUNK_SIZE = 100
 learning_rate = 0.1
@@ -51,7 +51,7 @@ seq = [
 ]
 
 # Repeat the first notes exactly structurally at the tail teaching the BPTT recurrence
-seq += seq[:9]
+# seq += seq[:1]
 
 # Unroll sequence into list of notes per step
 target_notes = []
