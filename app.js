@@ -20,18 +20,19 @@ const thresholdSlider = document.getElementById('threshold-slider');
 const thresholdVal = document.getElementById('threshold-val');
 const autoSwitchCheckbox = document.getElementById('auto-switch');
 const autoNoiseCheckbox = document.getElementById('auto-noise');
+const autoThresholdCheckbox = document.getElementById('auto-threshold');
 const iosWarning = document.getElementById('ios-warning');
 
 // Detect iOS devices to display the hardware mute warning
 const isIOS = [
-  'iPad Simulator',
-  'iPhone Simulator',
-  'iPod Simulator',
-  'iPad',
-  'iPhone',
-  'iPod'
+    'iPad Simulator',
+    'iPhone Simulator',
+    'iPod Simulator',
+    'iPad',
+    'iPhone',
+    'iPod'
 ].includes(navigator.platform)
-|| (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+    || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
 
 if (isIOS && iosWarning) {
     iosWarning.style.display = 'block';
@@ -39,6 +40,28 @@ if (isIOS && iosWarning) {
 
 let autoSwitchInterval = null;
 let autoNoiseInterval = null;
+let autoThresholdInterval = null;
+
+function startAutoThreshold() {
+    clearInterval(autoThresholdInterval);
+    const sampleAndSet = () => {
+        if (!isPlaying || !autoThresholdCheckbox.checked) return;
+        noteThreshold = 0.2 + Math.random() * 0.3; // 0.2..0.5
+        thresholdSlider.value = noteThreshold.toFixed(2);
+        thresholdVal.textContent = noteThreshold.toFixed(2);
+    };
+    // Run it instantly on engagement so there is no 15s visual delay
+    sampleAndSet();
+    autoThresholdInterval = setInterval(sampleAndSet, 15000);
+}
+
+autoThresholdCheckbox.addEventListener('change', (e) => {
+    if (e.target.checked && isPlaying) {
+        startAutoThreshold();
+    } else {
+        clearInterval(autoThresholdInterval);
+    }
+});
 
 function startAutoNoise() {
     clearInterval(autoNoiseInterval);
@@ -173,6 +196,11 @@ fetch('rnn_top20.json')
     });
 
 function loadSelectedNetwork() {
+    const wasPlaying = isPlaying;
+    if (wasPlaying) {
+        Tone.Transport.pause();
+    }
+
     const net = allRnnData.networks[currentNetworkIndex];
     rnnData = {
         W: net.W,
@@ -193,10 +221,16 @@ function loadSelectedNetwork() {
         gNodes.selectAll("*").remove();
         gLinks.selectAll("*").remove();
     }
-    
+
     synth.releaseAll();
     activeNotes.clear();
     initializeNetwork();
+
+    if (wasPlaying) {
+        setTimeout(() => {
+            if (isPlaying) Tone.Transport.start();
+        }, 100);
+    }
 }
 
 function initializeNetwork() {
@@ -334,6 +368,7 @@ async function togglePlayback(e) {
 
         if (autoSwitchCheckbox.checked) startAutoSwitch();
         if (autoNoiseCheckbox.checked) startAutoNoise();
+        if (autoThresholdCheckbox.checked) startAutoThreshold();
     } else {
         Tone.Transport.stop();
         Tone.Transport.clear(loopEvent);
@@ -342,6 +377,7 @@ async function togglePlayback(e) {
         isPlaying = false;
         clearInterval(autoSwitchInterval);
         clearInterval(autoNoiseInterval);
+        clearInterval(autoThresholdInterval);
         startBtn.textContent = 'Start Playing';
     }
 }
@@ -425,7 +461,7 @@ function stepRNN(time) {
     let currentActive = new Set();
     for (let j = 0; j < N; j++) {
         let baseAct = next_h[j];
-        
+
         // 1. Core State: Pure deterministic recurrent state tracking identically PyTorch trained constraints
         let cleanAct = Math.tanh(baseAct);
         h_state[j] = cleanAct;
@@ -436,7 +472,7 @@ function stepRNN(time) {
             noisyAct += (Math.random() * 2 - 1) * noiseLevel;
         }
         let finalOutputAct = Math.tanh(noisyAct);
-        
+
         let nodeRef = window.nodeMap[j];
         if (nodeRef) {
             nodeRef.activation = finalOutputAct;
@@ -463,7 +499,7 @@ function stepRNN(time) {
 
     if (toAttack.length > 0) synth.triggerAttack(toAttack, time);
     if (toRelease.length > 0) synth.triggerRelease(toRelease, time);
-    
+
     activeNotes = currentActive;
 
     // Animate visualizer via D3 (must be run on main thread sync to drawing)

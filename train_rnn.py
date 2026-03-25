@@ -10,19 +10,24 @@ print("Using device:", device)
 # ==========================================
 # HYPERPARAMETERS & CONFIGURATION
 # ==========================================
-N_neurons = 200
-K_batch = 100
-CHUNK_SIZE = 100
-learning_rate = 0.1
-num_epochs = 1000
-module_size = 10
-p_in = 0.35    # Dense local connections
-p_out = 0.015  # Very sparse global connections
+N_neurons = 150
+K_batch = 1000
+CHUNK_SIZE = 1000
+learning_rate = 0.05
+num_epochs = 2000
+module_size_min = 4
+module_size_max = 7
+p_module = 0.7        # Connections within a module
+p_macro = 0.15         # Connections to build macro modules
+p_macro_macro = 0.03  # Connections to build macro-macro modules
+p_global = 0.005       # Very sparse global connections
 sparsity_penalty = 0.001
-target_pruning_ratio = 0.3
-prune_every = 200
+target_pruning_ratio = 0.05
+prune_every = 500
 num_top_k = 20
 O_notes = 37
+module_size_min = 2
+module_size_max = 7
 # ==========================================
 
 # Notes mapping: 3 octaves, C3 to C6 (37 notes)
@@ -196,17 +201,63 @@ for chunk_idx in range(num_chunks):
     actual_chunk = min(CHUNK_SIZE, K_batch - chunk_idx * CHUNK_SIZE)
     print(f"\n--- Processing Chunk {chunk_idx+1}/{num_chunks} ({actual_chunk} networks) ---")
     
-    num_modules = N_neurons // module_size
-    
     rand_tensor = torch.rand(actual_chunk, N_neurons, N_neurons, device=device)
-    mask = (rand_tensor < p_out).float()
+    mask = (rand_tensor < p_global).float()
     
-    for m in range(num_modules):
-        start = m * module_size
-        end = start + module_size
-        block_rand = torch.rand(actual_chunk, module_size, module_size, device=device)
-        block_mask = (block_rand < p_in).float()
-        mask[:, start:end, start:end] = torch.max(mask[:, start:end, start:end], block_mask)
+    for k in range(actual_chunk):
+        # 1. Create modules
+        modules = []
+        curr_idx = 0
+        while curr_idx < N_neurons:
+            size = np.random.randint(module_size_min, module_size_max + 1)
+            if curr_idx + size > N_neurons:
+                size = N_neurons - curr_idx
+            if size > 0:
+                modules.append((curr_idx, curr_idx + size))
+            curr_idx += size
+            
+        # Add module internal connections
+        for (start, end) in modules:
+            m_size = end - start
+            block_rand = torch.rand(m_size, m_size, device=device)
+            mask[k, start:end, start:end] = torch.max(
+                mask[k, start:end, start:end], 
+                (block_rand < p_module).float()
+            )
+            
+        # 2. Macro modules
+        macro_modules = []
+        for i in range(0, len(modules), 2):
+            if i + 1 < len(modules):
+                m1_start, _ = modules[i]
+                _, m2_end = modules[i+1]
+                macro_modules.append((m1_start, m2_end))
+                
+                m_size = m2_end - m1_start
+                block_rand = torch.rand(m_size, m_size, device=device)
+                mask[k, m1_start:m2_end, m1_start:m2_end] = torch.max(
+                    mask[k, m1_start:m2_end, m1_start:m2_end], 
+                    (block_rand < p_macro).float()
+                )
+            else:
+                macro_modules.append(modules[i])
+                
+        # 3. Macro-macro modules
+        macro_macro_modules = []
+        for i in range(0, len(macro_modules), 2):
+            if i + 1 < len(macro_modules):
+                m1_start, _ = macro_modules[i]
+                _, m2_end = macro_modules[i+1]
+                macro_macro_modules.append((m1_start, m2_end))
+                
+                m_size = m2_end - m1_start
+                block_rand = torch.rand(m_size, m_size, device=device)
+                mask[k, m1_start:m2_end, m1_start:m2_end] = torch.max(
+                    mask[k, m1_start:m2_end, m1_start:m2_end], 
+                    (block_rand < p_macro_macro).float()
+                )
+            else:
+                macro_macro_modules.append(macro_modules[i])
 
     W = torch.randn(actual_chunk, N_neurons, N_neurons, device=device) * mask * 0.5
 
@@ -220,6 +271,11 @@ for chunk_idx in range(num_chunks):
     optimizer = torch.optim.Adam([h0, b, W], lr=learning_rate)
 
     for epoch in range(num_epochs):
+        # Linear decay: from learning_rate to learning_rate / 4 towards the end
+        current_lr = learning_rate * (1.0 - 0.75 * (epoch / max(1, num_epochs - 1)))
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = current_lr
+
         optimizer.zero_grad()
         outputs = forward_pass(W, b, h0)
         losses = compute_loss(outputs)
