@@ -128,26 +128,32 @@ thresholdSlider.addEventListener('input', (e) => {
 });
 
 // Setup Tone.js Synthesis
-// We'll use a PolySynth to play multiple notes
-const limiter = new Tone.Limiter(-4).toDestination();
-const compressor = new Tone.Compressor(-20, 3).connect(limiter);
+const limiter = new Tone.Limiter(-10).toDestination();
+const compressor = new Tone.Compressor({
+    threshold: -30,
+    ratio: 4,
+    attack: 0.03,
+    release: 0.1
+}).connect(limiter);
+
+// Filter for warmer sound
+const filterLow = new Tone.Filter(1800, "lowpass").connect(compressor);
 
 const synth = new Tone.PolySynth(Tone.Synth, {
     oscillator: {
-        type: "fatsine",
-        count: 1,
-        spread: 30
+        type: "sine"
     },
     envelope: {
-        attack: 0.01,
-        decay: 0.2,
+        attack: 0.05,
+        decay: 0.3,
         sustain: 0.4,
-        release: 0.8
+        release: 1.2
     },
-    volume: -6
-}).connect(compressor);
+    volume: -12
+}).connect(filterLow);
+
 // Add some mild reverb
-const reverb = new Tone.Reverb(1.5).connect(compressor);
+const reverb = new Tone.Reverb(2.0).connect(filterLow);
 synth.connect(reverb);
 
 
