@@ -229,7 +229,7 @@ function loadSelectedNetwork() {
     if (wasPlaying) {
         setTimeout(() => {
             if (isPlaying) Tone.Transport.start();
-        }, 100);
+        }, 400);
     }
 }
 
